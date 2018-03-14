@@ -71,7 +71,8 @@ ui <- dashboardPage(skin = "green",
                         hr(),
                         fileInput("files", label = "Files of raw data", multiple = T, accept = c(".txt")),
                         fileInput("meta", label = "Metadata with sample information", multiple = F, accept = c(".xlsx")),
-                        actionButton("go","Go!")
+                        actionButton("go","Go!"),
+                        textInput("dataset_name", "Name your dataset for export")
                     ),
 
 
@@ -85,12 +86,13 @@ ui <- dashboardPage(skin = "green",
                                      textOutput("debugtxt")
                             ),
                             tabPanel("Processed Data",
-                                     DTOutput("datatbl")
+                                     DTOutput("datatbl"),
+                                     downloadButton("downloadexp", "Download (wide form)"),
+                                     downloadButton("downloadfinal", "Download (long form)")
                             )
                         )
 
                     )
-
 
 )
 
@@ -103,7 +105,7 @@ server <- function(input, output){
 
     # Secondary Names
     secondary_names <- reactive({
-        read_xlsx(meta_path, skip = 2, n_max = 1) %>%
+        read_xlsx(input$meta$datapath, skip = 2, n_max = 1) %>%
             select(-c(1:3)) %>% gather(key = "secondary_name", value = "sample") %>%
             mutate(
                 sample = case_when(
@@ -172,178 +174,178 @@ server <- function(input, output){
 
     # Data Processing -------------------------------------------------------------------------------------------------
 
-    data <- reactive({
+    final <- reactive({
 
         withProgress(message = "Calculating DAG and TAG combinations",
-            {
+                     {
 
-            # ** DAGs TAGs ----------------------------------------------------------------------------------------------------
+                         # ** DAGs TAGs ----------------------------------------------------------------------------------------------------
 
-            # Extracting information about the side chains from the scan names and filtering out internal standards as `AGs_IS`.
-            # TAGs and DAGs
-            AGs <- raw() %>% filter(class %in% c("DAG", "TAG"))
+                         # Extracting information about the side chains from the scan names and filtering out internal standards as `AGs_IS`.
+                         # TAGs and DAGs
+                         AGs <- raw() %>% filter(class %in% c("DAG", "TAG"))
 
-            # Their respective internal standards
-            AGs_IS <- AGs %>% filter(str_detect(lipid, "^IS")) %>% select(-scan, -ID)
+                         # Their respective internal standards
+                         AGs_IS <- AGs %>% filter(str_detect(lipid, "^IS")) %>% select(-scan, -ID)
 
-            # Information about sidechain lenghts and desaturation is in the scan name
-            AGs <- AGs %>%
-                filter(!str_detect(lipid, "^IS")) %>%
-                group_by(class) %>%
-                separate(lipid, into = c("first","rest"), sep = " ", remove = F) %>%
-                separate(rest, into = c("C_total","D_total"), sep = ":") %>% select(-first) %>%
-                mutate(C_total = parse_number(C_total),
-                       D_total = parse_number(D_total)) %>%
-                separate(scan, into = c("C","D"), sep = ":", remove = F) %>%
-                mutate(C = parse_number(str_replace(C,"-","")),
-                       D = parse_number(D)) %>% select(-scan) %>%
-                ungroup()
+                         # Information about sidechain lenghts and desaturation is in the scan name
+                         AGs <- AGs %>%
+                             filter(!str_detect(lipid, "^IS")) %>%
+                             group_by(class) %>%
+                             separate(lipid, into = c("first","rest"), sep = " ", remove = F) %>%
+                             separate(rest, into = c("C_total","D_total"), sep = ":") %>% select(-first) %>%
+                             mutate(C_total = parse_number(C_total),
+                                    D_total = parse_number(D_total)) %>%
+                             separate(scan, into = c("C","D"), sep = ":", remove = F) %>%
+                             mutate(C = parse_number(str_replace(C,"-","")),
+                                    D = parse_number(D)) %>% select(-scan) %>%
+                             ungroup()
 
-            # Data and meta information for DAGs and TAGs
-            DAGs <- filter(AGs, class == "DAG")
-            meta_DAGs <- raw() %>% filter(class == "DAG") %>% select(class, sample, Rf, standard_input, sample_volume) %>% distinct()
+                         # Data and meta information for DAGs and TAGs
+                         DAGs <- filter(AGs, class == "DAG")
+                         meta_DAGs <- raw() %>% filter(class == "DAG") %>% select(class, sample, Rf, standard_input, sample_volume) %>% distinct()
 
-            TAGs <- filter(AGs, class == "TAG")
-            meta_TAGs <- raw() %>% filter(class == "TAG") %>% select(class, sample, Rf, standard_input, sample_volume) %>% distinct()
-
-
-            incProgress(0.05)
-
-            # *** DAG TAG calculations ----------------------------------------------------------------------------------------
-
-            # DAGs
-            DAGcombos <- DAGs %>% select(-Rf, - ID, -standard_input, -sample_volume) %>%
-                spread(key = "sample", value = "intensity") %>%
-                split(.$lipid) %>%
-                map(function(x){
-                    x <- x %>%
-                        mutate(index = row_number())
-                    x %>% bind_rows(x) %>%
-                        combn(x = .$index, m = 2, simplify = F, FUN = DAG_fun, data = .) %>%
-                        bind_rows() %>%
-                        distinct() %>%
-                        select(-lipid)
-                }) %>%
-                bind_rows(.id = "lipid") %>%
-                filter(C_total == C1 + C2 & D_total == D1 + D2) %>%
-                mutate(
-                    key1 = paste0(C1, ":", D1),
-                    key2 = paste0(C2,":", D2),
-                    sort1 = paste0(C1, D1),
-                    sort2 = paste0(C2, D2)
-                )
-
-            incProgress(0.2)
-
-            DAGsums <- DAGcombos %>%
-                filter(sort1 >= sort2) %>%  # larger value first in the lipid identifyier, rest is duplicates
-                gather(starts_with("Sample"), starts_with("Kon"), key = "sample", value = "intensity") %>%
-                mutate(
-                    intensity = if_else(C1 == C2 & D1 == D2, intensity/2, intensity),
-                    key = paste0(key1, "_", key2)
-                ) %>%
-                select(-C1, -C2, -D1, -D2) %>%
-                distinct() %>%
-                mutate(lipid = paste0("DAG ", key)) %>%
-                select(-key, -C_total, -D_total, -key1, -key2, -sort1, -sort2)
-
-            newDAGs <- left_join(DAGsums, meta_DAGs) %>%
-                distinct() %>%
-                bind_rows(filter(AGs_IS, class == "DAG"))
+                         TAGs <- filter(AGs, class == "TAG")
+                         meta_TAGs <- raw() %>% filter(class == "TAG") %>% select(class, sample, Rf, standard_input, sample_volume) %>% distinct()
 
 
-            incProgress(0.05)
+                         incProgress(0.05)
 
-            # TAGs
-            TAGcombos <- TAGs %>% select(-Rf, - ID, -standard_input, -sample_volume) %>%
-                spread(key = "sample", value = "intensity") %>%
-                split(.$lipid) %>%
-                map(function(x){
-                    x <- x %>% mutate(index = row_number())
-                    x %>% bind_rows(x) %>%
-                        combn(x = .$index, m = 2, simplify = F, FUN = TAG_fun, data = .) %>%
-                        bind_rows() %>%
-                        distinct() %>%
-                        select(-lipid)
-                }) %>%
-                bind_rows(.id = "lipid") %>%
-                filter(C_total == C1 + C2 + C3 & D_total == D1 + D2 + D3) %>%
-                mutate(
-                    key1 = paste0(C1, ":", D1),
-                    key2 = paste0(C2,":", D2),
-                    key3 = paste0(C3,":", D3),
-                    sort1 = paste0(C1, D1),
-                    sort2 = paste0(C2, D2),
-                    sort3 = paste0(C3, D3)
-                )
+                         # *** DAG TAG calculations ----------------------------------------------------------------------------------------
 
-            incProgress(0.4)
+                         # DAGs
+                         DAGcombos <- DAGs %>% select(-Rf, - ID, -standard_input, -sample_volume) %>%
+                             spread(key = "sample", value = "intensity") %>%
+                             split(.$lipid) %>%
+                             map(function(x){
+                                 x <- x %>%
+                                     mutate(index = row_number())
+                                 x %>% bind_rows(x) %>%
+                                     combn(x = .$index, m = 2, simplify = F, FUN = DAG_fun, data = .) %>%
+                                     bind_rows() %>%
+                                     distinct() %>%
+                                     select(-lipid)
+                             }) %>%
+                             bind_rows(.id = "lipid") %>%
+                             filter(C_total == C1 + C2 & D_total == D1 + D2) %>%
+                             mutate(
+                                 key1 = paste0(C1, ":", D1),
+                                 key2 = paste0(C2,":", D2),
+                                 sort1 = paste0(C1, D1),
+                                 sort2 = paste0(C2, D2)
+                             )
 
-            TAGsums <- TAGcombos %>%
-                filter(sort1 >= sort2 & sort2 >= sort3) %>%  # larger or same value first in the lipid identifier, rest is duplicates
-                gather(starts_with("Sample"), starts_with("Kon"), key = "sample", value = "intensity") %>%
-                mutate(
-                    intensity = case_when(
-                        C1 == C2 & C1 == C3 & D1 == D2 & C1 == D3 ~ intensity/3,
-                        C1 == C2 & D1 == D2 ~ intensity/2,
-                        C1 == C3 & D1 == D3 ~ intensity/2,
-                        C2 == C3 & D2 == D3 ~ intensity/2,
-                        TRUE ~ intensity
-                    ),
-                    key = paste0(key1, "_", key2, "_", key3)
-                ) %>%
-                select(-C1, -C2, -D1, -D2, -C3,-D3) %>% distinct() %>%
-                mutate(lipid = paste0("TAG ", key)) %>%
-                select(-key, -C_total, -D_total, -key1, -key2, -key3, -sort1, -sort2, -sort3)
+                         incProgress(0.2)
 
-            incProgress(0.05)
+                         DAGsums <- DAGcombos %>%
+                             filter(sort1 >= sort2) %>%  # larger value first in the lipid identifyier, rest is duplicates
+                             gather(starts_with("Sample"), starts_with("Kon"), key = "sample", value = "intensity") %>%
+                             mutate(
+                                 intensity = if_else(C1 == C2 & D1 == D2, intensity/2, intensity),
+                                 key = paste0(key1, "_", key2)
+                             ) %>%
+                             select(-C1, -C2, -D1, -D2) %>%
+                             distinct() %>%
+                             mutate(lipid = paste0("DAG ", key)) %>%
+                             select(-key, -C_total, -D_total, -key1, -key2, -sort1, -sort2)
 
-            newTAGs <- left_join(TAGsums, meta_TAGs) %>%
-                distinct() %>%
-                bind_rows(filter(AGs_IS, class == "TAG"))
-
-            rest <- raw() %>%
-                filter(!class %in% c("DAG", "TAG")) %>%
-                select(-scan, -ID) # we won't need the scan names after augmenting the data
-            data <- bind_rows(rest, newDAGs, newTAGs)
+                         newDAGs <- left_join(DAGsums, meta_DAGs) %>%
+                             distinct() %>%
+                             bind_rows(filter(AGs_IS, class == "DAG"))
 
 
-            # ** Numbercrunching ----------------------------------------------------------------------------------------------
+                         incProgress(0.05)
 
-            # Internal Standards exist per lipid class and start with IS.
-            data <- data %>%
-                group_by(class, sample) %>%
-                mutate(standard_mean = mean(intensity[str_detect(lipid, "^IS ")]),
-                       standard_normalised = standard_input/standard_mean) %>%
-                ungroup()
+                         # TAGs
+                         TAGcombos <- TAGs %>% select(-Rf, - ID, -standard_input, -sample_volume) %>%
+                             spread(key = "sample", value = "intensity") %>%
+                             split(.$lipid) %>%
+                             map(function(x){
+                                 x <- x %>% mutate(index = row_number())
+                                 x %>% bind_rows(x) %>%
+                                     combn(x = .$index, m = 2, simplify = F, FUN = TAG_fun, data = .) %>%
+                                     bind_rows() %>%
+                                     distinct() %>%
+                                     select(-lipid)
+                             }) %>%
+                             bind_rows(.id = "lipid") %>%
+                             filter(C_total == C1 + C2 + C3 & D_total == D1 + D2 + D3) %>%
+                             mutate(
+                                 key1 = paste0(C1, ":", D1),
+                                 key2 = paste0(C2,":", D2),
+                                 key3 = paste0(C3,":", D3),
+                                 sort1 = paste0(C1, D1),
+                                 sort2 = paste0(C2, D2),
+                                 sort3 = paste0(C3, D3)
+                             )
 
-            # calculate pmol based on intensity and standards
-            data <- data %>%
-                mutate(pmol = intensity * standard_normalised) %>% filter(!str_detect(lipid, "^IS "))
+                         incProgress(0.4)
 
-            # blanc substraction
-            data <- data %>%
-                mutate(pmol = pmol - mean(pmol[str_detect(sample, "^Kon")])) %>%
-                mutate(pmol = if_else(pmol < 0, 0, pmol)) %>% filter(!str_detect(sample, "^Kon"))
+                         TAGsums <- TAGcombos %>%
+                             filter(sort1 >= sort2 & sort2 >= sort3) %>%  # larger or same value first in the lipid identifier, rest is duplicates
+                             gather(starts_with("Sample"), starts_with("Kon"), key = "sample", value = "intensity") %>%
+                             mutate(
+                                 intensity = case_when(
+                                     C1 == C2 & C1 == C3 & D1 == D2 & C1 == D3 ~ intensity/3,
+                                     C1 == C2 & D1 == D2 ~ intensity/2,
+                                     C1 == C3 & D1 == D3 ~ intensity/2,
+                                     C2 == C3 & D2 == D3 ~ intensity/2,
+                                     TRUE ~ intensity
+                                 ),
+                                 key = paste0(key1, "_", key2, "_", key3)
+                             ) %>%
+                             select(-C1, -C2, -D1, -D2, -C3,-D3) %>% distinct() %>%
+                             mutate(lipid = paste0("TAG ", key)) %>%
+                             select(-key, -C_total, -D_total, -key1, -key2, -key3, -sort1, -sort2, -sort3)
 
-            # Response Factor
-            data <- data %>%
-                mutate(pmol = pmol * Rf)
+                         incProgress(0.05)
 
-            # molar in pmol / µl = nmol
-            data <- data %>%
-                mutate(nmolar = pmol/sample_volume)
+                         newTAGs <- left_join(TAGsums, meta_TAGs) %>%
+                             distinct() %>%
+                             bind_rows(filter(AGs_IS, class == "TAG"))
 
-            # final data, cleaned of unneccessary columns used in earlier calculations
-            final <- data %>%
-                select(-sample_volume, -Rf, -standard_normalised, -standard_input, -standard_mean, -intensity)
+                         rest <- raw() %>%
+                             filter(!class %in% c("DAG", "TAG")) %>%
+                             select(-scan, -ID) # we won't need the scan names after augmenting the data
+                         data <- bind_rows(rest, newDAGs, newTAGs)
 
-            incProgress(0.05)
 
-            return(final)
-        })
+                         # ** Numbercrunching ----------------------------------------------------------------------------------------------
 
-# End of withProgress
+                         # Internal Standards exist per lipid class and start with IS.
+                         data <- data %>%
+                             group_by(class, sample) %>%
+                             mutate(standard_mean = mean(intensity[str_detect(lipid, "^IS ")]),
+                                    standard_normalised = standard_input/standard_mean) %>%
+                             ungroup()
+
+                         # calculate pmol based on intensity and standards
+                         data <- data %>%
+                             mutate(pmol = intensity * standard_normalised) %>% filter(!str_detect(lipid, "^IS "))
+
+                         # blanc substraction
+                         data <- data %>%
+                             mutate(pmol = pmol - mean(pmol[str_detect(sample, "^Kon")])) %>%
+                             mutate(pmol = if_else(pmol < 0, 0, pmol)) %>% filter(!str_detect(sample, "^Kon"))
+
+                         # Response Factor
+                         data <- data %>%
+                             mutate(pmol = pmol * Rf)
+
+                         # molar in pmol / µl = nmol
+                         data <- data %>%
+                             mutate(nmolar = pmol/sample_volume)
+
+                         # final data, cleaned of unneccessary columns used in earlier calculations
+                         final <- data %>%
+                             select(-sample_volume, -Rf, -standard_normalised, -standard_input, -standard_mean, -intensity)
+
+                         incProgress(0.05)
+
+                         return(final)
+                     })
+
+        # End of withProgress
     })
 
     # ** Export Ready Data --------------------------------------------------------------------------------------------
@@ -365,9 +367,27 @@ server <- function(input, output){
 
     # Processed Data Datatable
     output$datatbl <- DT::renderDT({
-        data()
+        final()
     }, filter="top", options = list(sDom  = '<"top">lrt<"bottom">ip'))
 
+
+    output$downloadexp <- downloadHandler(
+        filename = function() {
+            paste0(input$dataset_name, "_wide" ,".csv")
+        },
+        content = function(con){
+            write_csv(export(), con)
+        }
+    )
+
+    output$downloadfinal <- downloadHandler(
+        filename = function() {
+            paste0(input$dataset_name, "_long" ,".csv")
+        },
+        content = function(con){
+            write_csv(final(), con)
+        }
+    )
 
 
     # Debug
@@ -377,10 +397,10 @@ server <- function(input, output){
 
 
 
-}
+        }
 
 
 
-# Run App ---------------------------------------------------------------------------------------------------------
+    # Run App ---------------------------------------------------------------------------------------------------------
 
-shinyApp(ui, server)
+    shinyApp(ui, server)
