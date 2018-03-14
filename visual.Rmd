@@ -1,0 +1,156 @@
+---
+title: ' Visualization'
+author: ' Jannik Buhr '
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_notebook:
+    theme: lumen
+    number_sections: yes
+    toc: yes
+params:
+  input_folder: ./output/
+  input_file: final_nmolar.csv
+  template_name: template_test.xlsx
+  output_folder: ./output/plots/
+---
+
+## Introdction
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, message = F,
+warning = F, device = "png", dpi = 96, type = "cairo")
+```
+
+```{r Preamble}
+library(tidyverse) # Wrangling and ggplot
+# library(readxl) # excel-import
+library(ggsci) # color palettes for journals
+library(scales) # more scales and color options
+library(ggfortify) # principal component plots
+```
+
+# Data Import
+
+```{r}
+raw_data <- read_csv(paste0(params$input_folder, params$input_file))
+```
+
+# Data preparation
+
+```{r}
+visual_data <- raw_data %>%
+    gather(-Lipid, key = "sample", value = "nmolar") %>% 
+    separate(Lipid, into = c("class", "FAs"), sep = " ", remove = F) %>% 
+    select(-FAs) %>% 
+    separate(sample, into = c("type", "special", "replicate"), sep = "_", extra = "merge")
+
+visual_data <- visual_data %>%
+    mutate(
+        replicate = if_else(type == "WT", special, replicate),
+        special = NA_character_
+    )
+```
+
+# Visualisation
+
+Because everything is better with a pretty graph.
+
+```{r}
+by_class_sum <- visual_data %>%
+    group_by(class, type, special, replicate) %>% 
+    summarise(
+        nmolar = sum(nmolar)
+    )
+
+by_type_mean <- by_class_sum %>%
+    group_by(class, type) %>% 
+    summarise(
+        SD = sd(nmolar),
+        nmolar = mean(nmolar)
+    )
+
+by_type_mean %>% 
+    ggplot() +
+    aes(x = class, y = nmolar,
+        fill = type,
+        ymin = nmolar - SD,
+        ymax = nmolar + SD) +
+    geom_col(position = position_dodge(.9)) +
+    geom_errorbar(position = position_dodge(0.9)) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = c(1,1), legend.justification = c(1,1)) +
+    labs(y = "Concentration in nmol",
+         x = "Lipid class") +
+    scale_fill_nejm()
+```
+
+Or maybe you want a species profile, say for PCs:
+
+```{r PC_profile, fig.width = 16}
+PC_data <-
+    visual_data %>%
+    filter(class == "PC") %>% 
+    group_by(Lipid, type) %>% 
+    summarize(
+        SD = sd(nmolar),
+        nmolar = mean(nmolar)
+    ) %>% 
+    filter(
+        nmolar > 0.1
+    )
+
+PC_data %>% 
+    ggplot() +
+    aes(x = Lipid, y = nmolar,
+        fill = type,
+        ymin = nmolar - SD,
+        ymax = nmolar + SD) +
+    geom_col(position = position_dodge(.9)) +
+    geom_errorbar(position = position_dodge(0.9)) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = c(1,1), legend.justification = c(1,1)) +
+    labs(y = "Concentration in nmol",
+         x = "Lipid") +
+    scale_fill_nejm()
+```
+
+## Loop for all species
+
+Or all species profiles.
+
+```{r}
+for (i in unique(visual_data$class)){
+    class_data <-
+        visual_data %>%
+        filter(class == i) %>% 
+        group_by(Lipid, type) %>% 
+        summarize(
+            SD = sd(nmolar),
+            nmolar = mean(nmolar)
+        )
+    
+class_plot <- class_data %>% 
+        ggplot() +
+        aes(x = Lipid, y = nmolar,
+            fill = type,
+            ymin = nmolar - SD,
+            ymax = nmolar + SD) +
+        geom_col(position = position_dodge(.9)) +
+        geom_errorbar(position = position_dodge(0.9)) +
+        theme_classic() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = c(1,1), legend.justification = c(1,1)) +
+        labs(y = "Concentration in nmol",
+             x = "Lipid") +
+        scale_fill_nejm()
+
+ggsave(filename = paste0(i, "_profile.png"),
+       plot = class_plot,
+       path = params$output_folder,
+       device = "png")
+}
+```
+
