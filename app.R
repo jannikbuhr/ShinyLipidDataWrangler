@@ -84,6 +84,7 @@ ui <- dashboardPage(skin = "green",
                     # ** Body ------------------------------------------------------------------------------------------------------------
 
                     dashboardBody(
+                        p("TODO: Fix / combine weird sample names like Sample 13b and Sample 13a from different files"),
                         tabsetPanel(
                             tabPanel("Raw Data",
                                      # Table Output with all measurements, raw
@@ -106,9 +107,10 @@ ui <- dashboardPage(skin = "green",
 server <- function(input, output){
 
 
-    # ** Data Input ---------------------------------------------------------------------------------------------------
+    # * Data Input ---------------------------------------------------------------------------------------------------
 
-    # Secondary Names
+    # ** Secondary Names ----------------------------------------------------------------------------------------------
+
     secondary_names <- reactive({
         read_xlsx(input$meta$datapath, skip = 2, n_max = 1) %>%
             select(-c(1:3)) %>% gather(key = "secondary_name", value = "sample") %>%
@@ -129,12 +131,13 @@ server <- function(input, output){
 
         # Extract the class from filenames to use as .id in the complete dataframe
         filenames <- str_split(input$files$name, "_", simplify = T)
-        names(files) <- str_replace_all(filenames[,ncol(filenames)],".txt", "")
+        names(files) <- str_replace(filenames[,ncol(filenames)],".txt", "")
 
         data <- map_df(files, read_tsv, skip = 2, .id = "class") %>%
             gather(matches("\\d+"), key = "sample_num", value = "intensity", convert = T)
 
         # augment the data with sample names from the raw data
+        # Fixing samples like sample 13a and a by mean() (TODO)
         sample_names <- map_df(files, read_tsv, skip = 1, n_max = 1, .id = "class")[-c(2:7)] %>%
             gather(-class, key = "sample", value = "sample_num") %>%
             mutate(
@@ -142,7 +145,9 @@ server <- function(input, output){
                     str_detect(sample, "^Sample") ~ sample,
                     str_detect(sample, "^Kon") ~ sample,
                     TRUE ~ paste("Sample", sample)
-                )
+                ),
+                # Deleting a or b after the number
+                sample = if_else(str_detect(sample, "^Sample"), str_remove(sample, "\\w$"), sample)
             )
 
         data <- left_join(data, sample_names)
@@ -153,6 +158,13 @@ server <- function(input, output){
 
         # remove rows with non-existent samples / intensities
         data <- data %>% filter(!is.na(sample))
+
+        # Mean of samples that have been taken twice (a and b, removed during import so they have the same name)
+        data <- data %>% group_by_at(names(data)[-grep("intensity", names(data))])%>% summarise(
+            intensity = mean(intensity)
+        )
+
+        return(data)
 
         # Now the template with meta data
         meta_path <- input$meta$datapath
