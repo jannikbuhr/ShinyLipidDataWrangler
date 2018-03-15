@@ -71,10 +71,12 @@ ui <- dashboardPage(skin = "green",
                         hr(),
                         fileInput("files", label = "Files of raw data", multiple = T, accept = c(".txt")),
                         fileInput("meta", label = "Metadata with sample information", multiple = F, accept = c(".xlsx")),
+                        actionButton("go","Load Data!"),
                         radioButtons("radio", "Calculate DAGs and TAGs?",
                                      choices = list("Only simple sums" = 1, "All allowed permutations" = 2),
                                      selected = 2),
-                        actionButton("go","Go!"),
+                        checkboxInput("drop0","Drop lipids with 0 intensity for all samples in wide form?",
+                                      value = T),
                         textInput("dataset_name", "Name your dataset for export")
                     ),
 
@@ -366,10 +368,12 @@ server <- function(input, output){
     # ** Export Ready Data --------------------------------------------------------------------------------------------
 
     export <- reactive({
-        final() %>%
+        df <- final() %>%
             select(-class, -sample) %>%
             spread(key = "secondary_name", value = "nmolar") %>%
             rename(Lipid = lipid)
+        df <- df[rowSums(df[,-1] == 0) != ncol(df[,-1]),]
+        return(df)
     })
 
     # ** Output --------------------------------------------------------------------------------------------------------
