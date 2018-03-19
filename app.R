@@ -102,7 +102,6 @@ ui <- dashboardPage(skin = "green",
                         )
 
                     )
-
 )
 
 # SERVER ----------------------------------------------------------------------------------------------------------
@@ -143,7 +142,6 @@ server <- function(input, output){
             gather(matches("\\d+"), key = "sample_num", value = "intensity", convert = T)
 
         # augment the data with sample names from the raw data
-        # Fixing samples like sample 13a and a by mean() (TODO)
         sample_names <- map_df(files, read_tsv, skip = 1, n_max = 1, .id = "class")[-c(2:7)] %>%
             gather(-class, key = "sample", value = "sample_num") %>%
             mutate(
@@ -154,6 +152,7 @@ server <- function(input, output){
                 )
             )
 
+        cat(file=stderr(), "Reached Sample Names \n")
         data <- left_join(data, sample_names)
 
         # Delete unnecessary columns
@@ -171,10 +170,14 @@ server <- function(input, output){
             select(-3) %>% filter(!is.na(Rf)) %>%
             gather(-1, -2, key = "sample", value = "standard_input")
 
+        cat(file=stderr(), "Reached Metadata \n")
+
         # Then the volumes of the samples
         sample_volumes <- read_xlsx(meta_path, skip = 3, n_max = 1) %>%
             select(-1, -2, -3) %>%
             gather(key = "sample", value = "sample_volume")
+
+        cat(file=stderr(), "Reached Sample Volumes \n")
 
         data <- left_join(data, meta)
 
@@ -184,6 +187,7 @@ server <- function(input, output){
         data <- data %>% mutate(LipidName = str_replace(LipidName, "\\+NH4", "")) %>%
             rename(lipid = LipidName)
 
+        cat(file=stderr(), "Raw data is fine. \n")
         return(data)
     })
 
@@ -226,7 +230,7 @@ server <- function(input, output){
                              TAGs <- filter(AGs, class == "TAG")
                              meta_TAGs <- raw() %>% filter(class == "TAG") %>% select(class, sample, Rf, standard_input, sample_volume) %>% distinct()
 
-
+                             cat(file=stderr(), "TAGs and DAGs separated \n")
                              incProgress(0.05)
 
                              # *** DAG TAG calculations ----------------------------------------------------------------------------------------
@@ -322,6 +326,8 @@ server <- function(input, output){
                                  distinct() %>%
                                  bind_rows(filter(AGs_IS, class == "TAG"))
 
+                             cat(file=stderr(), "TAGs and DAGs calculated \n")
+
                              rest <- raw() %>%
                                  filter(!class %in% c("DAG", "TAG")) %>%
                                  select(-scan, -ID) # we won't need the scan names after augmenting the data
@@ -337,6 +343,7 @@ server <- function(input, output){
         else{
             data <- raw() %>% select(-scan, -ID) %>% group_by_at(.vars = vars(-intensity)) %>%
                 summarise(intensity = sum(intensity)) %>% ungroup()
+            cat(file=stderr(), "Data was only summed, no permutations used. \n")
         }
 
         # ** Numbercrunching ----------------------------------------------------------------------------------------------
@@ -367,7 +374,7 @@ server <- function(input, output){
 
         # final data, cleaned of unneccessary columns used in earlier calculations
         final <- data %>% ungroup() %>%
-            select(-sample_volume, -Rf, -standard_normalised, -standard_input, -standard_mean, -intensity, -pmol) %>%
+            select(class, lipid, sample, molar) %>%
             left_join(secondary_names())
 
         return(final)
@@ -377,11 +384,15 @@ server <- function(input, output){
     # ** Export Ready Data --------------------------------------------------------------------------------------------
 
     export <- reactive({
-        df <- final() %>% ungroup() %>%
+        df <- final() %>%
             select(-class, -sample) %>%
             spread(key = "secondary_name", value = "molar") %>%
             rename(Lipid = lipid)
-        df <- df[rowSums(df[,-1] == 0) != ncol(df[,-1]),]
+
+        if (input$drop0){
+            df <- df[rowSums(df[,-1] == 0) != ncol(df[,-1]),] # Delete rows with all 0s.
+        }
+
         return(df)
     })
 
