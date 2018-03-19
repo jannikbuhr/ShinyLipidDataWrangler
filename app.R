@@ -361,7 +361,7 @@ server <- function(input, output){
 
         # blanc substraction
         data <- data %>%
-            mutate(pmol = pmol - mean(pmol[str_detect(sample, "^Kon")])) %>%
+            mutate(pmol = pmol - mean(pmol[str_detect(sample, "^Kon")], na.rm = T)) %>%
             mutate(pmol = if_else(pmol < 0, 0, pmol)) %>% filter(!str_detect(sample, "^Kon"))
 
         # Response Factor
@@ -436,7 +436,6 @@ server <- function(input, output){
 
 
 }
-
 
 
 # Run App ---------------------------------------------------------------------------------------------------------
