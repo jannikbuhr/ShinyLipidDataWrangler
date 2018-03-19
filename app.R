@@ -84,7 +84,8 @@ ui <- dashboardPage(skin = "green",
                     # ** Body ------------------------------------------------------------------------------------------------------------
 
                     dashboardBody(
-                        p("TODO: Fix / combine weird sample names like Sample 13b and Sample 13a from different files"),
+                        p("TODO: Fix / combine weird sample names like Sample 13b and Sample 13a from different files
+                          change name from nmolar to mumolar, omitt secondary names"),
                         tabsetPanel(
                             tabPanel("Raw Data",
                                      # Table Output with all measurements, raw
