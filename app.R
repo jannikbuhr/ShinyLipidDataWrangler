@@ -2,7 +2,7 @@
 # Handling packaged installing and dependencies -------------------------------------------------------------------
 
 #list of packages required
-list.of.packages <- c("shiny","shinydashboard","tidyverse", "readxl")
+list.of.packages <- c("shiny","shinydashboard","tidyverse", "readxl","DT")
 
 #checking missing packages from list
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
