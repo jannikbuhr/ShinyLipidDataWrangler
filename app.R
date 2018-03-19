@@ -127,6 +127,7 @@ server <- function(input, output){
     # ** Raw data ------------------------------------------------------------------------------------------------------
 
     raw <- eventReactive(input$go,{
+
         files <- input$files$datapath
 
         # Extract the class from filenames to use as .id in the complete dataframe
@@ -145,9 +146,9 @@ server <- function(input, output){
                     str_detect(sample, "^Sample") ~ sample,
                     str_detect(sample, "^Kon") ~ sample,
                     TRUE ~ paste("Sample", sample)
-                ),
+                )
                 # Deleting a or b after the number
-                sample = if_else(str_detect(sample, "^Sample"), str_remove(sample, "\\w$"), sample)
+                #sample = if_else(str_detect(sample, "^Sample"), str_remove(sample, "\\w$"), sample)
             )
 
         data <- left_join(data, sample_names)
@@ -160,11 +161,9 @@ server <- function(input, output){
         data <- data %>% filter(!is.na(sample))
 
         # Mean of samples that have been taken twice (a and b, removed during import so they have the same name)
-        data <- data %>% group_by_at(names(data)[-grep("intensity", names(data))])%>% summarise(
-            intensity = mean(intensity)
-        )
-
-        return(data)
+        # data <- data %>% group_by_at(vars(-intensity))%>% summarise(
+        #     intensity = mean(intensity)
+        # ) %>% ungroup()
 
         # Now the template with meta data
         meta_path <- input$meta$datapath
@@ -338,7 +337,7 @@ server <- function(input, output){
 
         # *** simple sums -------------------------------------------------------------------------------------------------
         else{
-            data <- raw() %>% select(-scan, -ID) %>% group_by(class, sample, lipid, Rf, sample_volume, standard_input) %>%
+            data <- raw() %>% select(-scan, -ID) %>% group_by_at(.vars = vars(-intensity)) %>%
                 summarise(intensity = sum(intensity)) %>% ungroup()
         }
 
@@ -369,7 +368,7 @@ server <- function(input, output){
             mutate(nmolar = pmol/sample_volume)
 
         # final data, cleaned of unneccessary columns used in earlier calculations
-        final <- data %>%
+        final <- data %>% ungroup() %>%
             select(-sample_volume, -Rf, -standard_normalised, -standard_input, -standard_mean, -intensity, -pmol) %>%
             left_join(secondary_names())
 
@@ -380,7 +379,7 @@ server <- function(input, output){
     # ** Export Ready Data --------------------------------------------------------------------------------------------
 
     export <- reactive({
-        df <- final() %>%
+        df <- final() %>% ungroup() %>%
             select(-class, -sample) %>%
             spread(key = "secondary_name", value = "nmolar") %>%
             rename(Lipid = lipid)
