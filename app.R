@@ -19,6 +19,9 @@ library(DT)
 library(tidyverse)
 library(readxl)
 
+# Make console output less cluttered
+options(readr.num_columns = 0)
+
 
 # Functions -------------------------------------------------------------------------------------------------------
 
@@ -84,8 +87,7 @@ ui <- dashboardPage(skin = "green",
                     # ** Body ------------------------------------------------------------------------------------------------------------
 
                     dashboardBody(
-                        p("TODO: Fix / combine weird sample names like Sample 13b and Sample 13a from different files
-                          change name from nmolar to mumolar, omitt secondary names"),
+                        p("TODO: "),
                         tabsetPanel(
                             tabPanel("Raw Data",
                                      # Table Output with all measurements, raw
@@ -113,7 +115,7 @@ server <- function(input, output){
     # ** Secondary Names ----------------------------------------------------------------------------------------------
 
     secondary_names <- reactive({
-        read_xlsx(input$meta$datapath, skip = 2, n_max = 1) %>%
+        meta <- read_xlsx(input$meta$datapath, skip = 2, n_max = 1) %>%
             select(-c(1:3)) %>% gather(key = "secondary_name", value = "sample") %>%
             mutate(
                 sample = case_when(
@@ -122,6 +124,8 @@ server <- function(input, output){
                     TRUE ~ paste("Sample", sample)
                 )
             )
+        cat(file=stderr(), "Reached Secondary Names \n")
+        return(meta)
     })
 
 
@@ -148,8 +152,6 @@ server <- function(input, output){
                     str_detect(sample, "^Kon") ~ sample,
                     TRUE ~ paste("Sample", sample)
                 )
-                # Deleting a or b after the number
-                #sample = if_else(str_detect(sample, "^Sample"), str_remove(sample, "\\w$"), sample)
             )
 
         data <- left_join(data, sample_names)
@@ -160,11 +162,6 @@ server <- function(input, output){
 
         # remove rows with non-existent samples / intensities
         data <- data %>% filter(!is.na(sample))
-
-        # Mean of samples that have been taken twice (a and b, removed during import so they have the same name)
-        # data <- data %>% group_by_at(vars(-intensity))%>% summarise(
-        #     intensity = mean(intensity)
-        # ) %>% ungroup()
 
         # Now the template with meta data
         meta_path <- input$meta$datapath
@@ -364,9 +361,9 @@ server <- function(input, output){
         data <- data %>%
             mutate(pmol = pmol * Rf)
 
-        # molar in pmol / µl = nmol
+        # molar µmolar
         data <- data %>%
-            mutate(nmolar = pmol/sample_volume)
+            mutate(molar = pmol/sample_volume)
 
         # final data, cleaned of unneccessary columns used in earlier calculations
         final <- data %>% ungroup() %>%
@@ -382,7 +379,7 @@ server <- function(input, output){
     export <- reactive({
         df <- final() %>% ungroup() %>%
             select(-class, -sample) %>%
-            spread(key = "secondary_name", value = "nmolar") %>%
+            spread(key = "secondary_name", value = "molar") %>%
             rename(Lipid = lipid)
         df <- df[rowSums(df[,-1] == 0) != ncol(df[,-1]),]
         return(df)
