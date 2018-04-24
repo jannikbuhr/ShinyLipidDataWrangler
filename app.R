@@ -247,7 +247,7 @@ server <- function(input, output){
                                          combn(x = .$index, m = 2, simplify = F, FUN = DAG_fun, data = .) %>%
                                          bind_rows() %>%
                                          distinct() %>%
-                                         select(-lipid)
+                                         rename(lipid_old = lipid)
                                  }) %>%
                                  bind_rows(.id = "lipid") %>%
                                  filter(C_total == C1 + C2 & D_total == D1 + D2) %>%
@@ -273,8 +273,7 @@ server <- function(input, output){
                                  select(-key, -C_total, -D_total, -key1, -key2, -sort1, -sort2)
 
                              newDAGs <- left_join(DAGsums, meta_DAGs) %>%
-                                 distinct() %>%
-                                 bind_rows(filter(AGs_IS, class == "DAG"))
+                                 distinct()
 
 
                              incProgress(0.05)
@@ -289,7 +288,7 @@ server <- function(input, output){
                                          combn(x = .$index, m = 2, simplify = F, FUN = TAG_fun, data = .) %>%
                                          bind_rows() %>%
                                          distinct() %>%
-                                         select(-lipid)
+                                         rename(lipid_old = lipid)
                                  }) %>%
                                  bind_rows(.id = "lipid") %>%
                                  filter(C_total == C1 + C2 + C3 & D_total == D1 + D2 + D3) %>%
@@ -324,15 +323,28 @@ server <- function(input, output){
                              incProgress(0.05)
 
                              newTAGs <- left_join(TAGsums, meta_TAGs) %>%
-                                 distinct() %>%
-                                 bind_rows(filter(AGs_IS, class == "TAG"))
+                                 distinct()
 
                              cat(file=stderr(), "TAGs and DAGs calculated \n")
 
                              rest <- raw() %>%
                                  filter(!class %in% c("DAG", "TAG")) %>%
                                  select(-scan, -ID) # we won't need the scan names after augmenting the data
-                             data <- bind_rows(rest, newDAGs, newTAGs)
+
+                             # Normalize the sum of sidechain combinations to the sum of prior measured overall intensity
+                             new <- bind_rows(newTAGs, newDAGs)
+                             new <- AGs %>% rename(lipid_old = lipid, intensity_old = intensity) %>%
+                                 select(lipid_old, sample, intensity_old) %>%
+                                 left_join(new,.) %>%
+                                 group_by(class, lipid_old, sample) %>%
+                                 mutate(intensity_old = sum(intensity_old),
+                                        intensity_sum = sum(intensity),
+                                        intensity = if_else(intensity_sum > 0, intensity * intensity_old / intensity_sum, 0)
+                                 )%>%
+                                 select(-intensity_old, -intensity_sum)
+
+                             data <- bind_rows(rest, new, AGs_IS) %>%
+                                 distinct()
 
                              incProgress(0.05)
 
@@ -343,7 +355,8 @@ server <- function(input, output){
         # *** simple sums -------------------------------------------------------------------------------------------------
         else{
             data <- raw() %>% select(-scan, -ID) %>% group_by_at(.vars = vars(-intensity)) %>%
-                summarise(intensity = sum(intensity)) %>% ungroup()
+                summarise(intensity = sum(intensity)) %>% ungroup() %>%
+                mutate(lipid_old = lipid)
             cat(file=stderr(), "Data was only summed, no permutations used. \n")
         }
 
@@ -375,7 +388,7 @@ server <- function(input, output){
 
         # final data, cleaned of unneccessary columns used in earlier calculations
         final <- data %>% ungroup() %>%
-            select(class, lipid, sample, molar) %>%
+            select(class, lipid, lipid_old, sample, molar) %>%
             left_join(secondary_names())
 
         return(final)
@@ -386,7 +399,7 @@ server <- function(input, output){
 
     export <- reactive({
         df <- final() %>%
-            select(-class, -sample) %>%
+            select(-class, -sample, -lipid_old) %>%
             spread(key = "secondary_name", value = "molar") %>%
             rename(Lipid = lipid)
 

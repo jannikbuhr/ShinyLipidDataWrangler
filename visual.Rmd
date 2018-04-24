@@ -29,18 +29,38 @@ library(shiny)
 # Data Import
 
 ```{r, echo=F}
-raw_data <- read_csv("../output/final_long.csv")
+raw_data <- read_csv("../output/new_long.csv")
 ```
+
+
 ```{r}
 df <- raw_data
-df <- df %>% filter(class == "TAG", sample == "Sample 1")
+df <- df %>% filter(class == "TAG", molar > 0)
+
+df %>% group_by(lipid_old, sample) %>% 
+    summarise(
+        molar = sum(molar),
+        secondary_name = secondary_name[1]
+    ) %>% ggplot()+
+    aes(x = lipid_old, y = molar, fill = sample)+
+    geom_col(position = "dodge")+
+    coord_flip()
+
 
 df %>% ggplot() +
-    aes(x =lipid_old, y = nmolar)+
-    geom_col(position = "stack")+
-    facet_wrap(~sample)+
+    aes(x =lipid_old, y = molar, fill = sample)+
+    geom_col(position = position_dodge(), width = 0.9)+
     coord_flip()+
+    guides(fill = F)+
     theme_classic()
+
+df %>% filter(lipid_old == "TAG 46:0") %>% 
+    ggplot()+
+    aes(x = sample, y = molar, fill = lipid)+
+    geom_col()+
+    coord_flip()+
+    theme(axis.text.x = element_text(angle = 30), text = element_text(face = "bold"))
+
 ```
 
 
