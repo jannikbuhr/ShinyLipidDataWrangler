@@ -3,15 +3,10 @@ title: ' Visualization'
 author: ' Jannik Buhr '
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
-  html_notebook:
-    theme: lumen
-    code_folding: hide
-    toc: yes
   html_document:
     theme: lumen
     number_sections: yes
     toc: yes
-runtime: shiny
 ---
 
 ## Introdction
@@ -34,26 +29,28 @@ library(shiny)
 # Data Import
 
 ```{r, echo=F}
-fileInput("file", "Input file (long format)", multiple = F, accept = c(".csv"))
+raw_data <- read_csv("../output/final_long.csv")
 ```
-
-
 ```{r}
+df <- raw_data
+df <- df %>% filter(class == "TAG", sample == "Sample 1")
 
-raw_data <- reactive({
-    read_csv(input$file$datapath)
-})
-
-renderTable({
-    head(raw_data())
-})
+df %>% ggplot() +
+    aes(x =lipid_old, y = nmolar)+
+    geom_col(position = "stack")+
+    facet_wrap(~sample)+
+    coord_flip()+
+    theme_classic()
 ```
+
+
+
+
 
 # Data preparation
 
 ```{r}
-visual_data <- reactive({
-    visual_data <- raw_data() %>%
+visual_data <- raw_data %>%
         separate(secondary_name, into = c("type", "special", "replicate"), sep = "_", extra = "merge")
     
     visual_data <- visual_data %>%
@@ -62,7 +59,6 @@ visual_data <- reactive({
             special = NA_character_
         )
     return(visual_data)
-})
 ```
 
 # Visualisation
@@ -79,22 +75,22 @@ renderPlot({
     by_class_sum <- visual_data() %>%
         group_by(class, type, special, replicate) %>% 
         summarise(
-            nmolar = sum(nmolar)
+            molar = sum(molar)
         )
     
     by_type_mean <- by_class_sum %>%
         group_by(class, type) %>% 
         summarise(
-            SD = sd(nmolar),
-            nmolar = mean(nmolar)
+            SD = sd(molar),
+            molar = mean(molar)
         )
     
     by_type_mean %>% 
         ggplot() +
-        aes(x = class, y = nmolar,
+        aes(x = class, y = molar,
             fill = type,
-            ymin = nmolar - SD,
-            ymax = nmolar + SD) +
+            ymin = molar - SD,
+            ymax = molar + SD) +
         geom_col(position = position_dodge(.9)) +
         geom_errorbar(position = position_dodge(0.9)) +
         theme_classic() +
@@ -116,19 +112,19 @@ renderPlot({
         filter(class == "PC") %>% 
         group_by(lipid, type) %>% 
         summarize(
-            SD = sd(nmolar),
-            nmolar = mean(nmolar)
+            SD = sd(molar),
+            molar = mean(molar)
         ) %>% 
         filter(
-            nmolar > 0.1
+            molar > 0.1
         )
     
     PC_data %>% 
         ggplot() +
-        aes(x = lipid, y = nmolar,
+        aes(x = lipid, y = molar,
             fill = type,
-            ymin = nmolar - SD,
-            ymax = nmolar + SD) +
+            ymin = molar - SD,
+            ymax = molar + SD) +
         geom_col(position = position_dodge(.9)) +
         geom_errorbar(position = position_dodge(0.9)) +
         theme_classic() +
@@ -145,23 +141,26 @@ renderPlot({
 
 Or all species profiles.
 
-```{r eval=FALSE, include=FALSE}
-for (i in unique(visual_data$class)){
+```{r echo=TRUE}
+output_folder <- "C:/Users/janni/desktop/test_output"
+reactive({
+
+for (i in unique(visual_data()$class)){
     class_data <-
-        visual_data %>%
+        visual_data() %>%
         filter(class == i) %>% 
         group_by(lipid, type) %>% 
         summarize(
-            SD = sd(nmolar),
-            nmolar = mean(nmolar)
+            SD = sd(molar),
+            molar = mean(molar)
         )
     
     class_plot <- class_data %>% 
         ggplot() +
-        aes(x = lipid, y = nmolar,
+        aes(x = lipid, y = molar,
             fill = type,
-            ymin = nmolar - SD,
-            ymax = nmolar + SD) +
+            ymin = molar - SD,
+            ymax = molar + SD) +
         geom_col(position = position_dodge(.9)) +
         geom_errorbar(position = position_dodge(0.9)) +
         theme_classic() +
@@ -173,8 +172,9 @@ for (i in unique(visual_data$class)){
     
     ggsave(filename = paste0(i, "_profile.png"),
            plot = class_plot,
-           path = params$output_folder,
+           path = output_folder,
            device = "png")
 }
+})
 ```
 

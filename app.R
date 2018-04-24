@@ -87,7 +87,8 @@ ui <- dashboardPage(skin = "green",
                     # ** Body ------------------------------------------------------------------------------------------------------------
 
                     dashboardBody(
-                        p("TODO: "),
+                        p("TODO: Keep information about total chains, extra column in long format.
+                          Species / Subspecies"),
                         tabsetPanel(
                             tabPanel("Raw Data",
                                      # Table Output with all measurements, raw
